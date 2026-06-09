@@ -1,0 +1,20 @@
+# 환경 변수 (토큰 등 민감 정보)
+*.env 
+
+# SQLite DB (컨테이너 빌드 시 로컬 DB 파일이 복사되어 덮어씌워지는 것 방지)
+*.db 
+
+# Python 캐시
+__pycache__/ 
+*.pyc 
+*.pyo 
+
+# 가상환경
+venv/ 
+.venv/ 
+
+# Git 및 Docker 관련 파일 (도커 이미지에 포함할 필요 없음)
+.git/
+.gitignore
+Dockerfile
+.dockerignore
