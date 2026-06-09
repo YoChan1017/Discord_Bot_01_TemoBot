@@ -48,9 +48,13 @@ def strip_time(reserve_time: str) -> str:
 # ─────────────────────────────────────────
 # DB 초기화
 # ─────────────────────────────────────────
-DB_PATH = "data/reservations.db"
+# 1. 경로를 확실한 절대 경로로 변경
+DB_PATH = "/app/data/reservations.db"
 
 def init_db():
+    # 2. sqlite3.connect를 하기 전에, 폴더가 없으면 무조건 강제로 생성하는 코드 추가!
+    os.makedirs("/app/data", exist_ok=True)
+
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
