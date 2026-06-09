@@ -31,6 +31,21 @@ TIME_SLOTS = [
 ]
 
 # ─────────────────────────────────────────
+# 날짜 헬퍼
+# ─────────────────────────────────────────
+def today_str() -> str:
+    """오늘 날짜 문자열 반환 (예: '2026-06-10')"""
+    return datetime.now(KST).strftime("%Y-%m-%d")
+
+def make_reserve_time(time_slot: str) -> str:
+    """날짜+시간 합성 (예: '2026-06-10 20:00')"""
+    return f"{today_str()} {time_slot}"
+
+def strip_time(reserve_time: str) -> str:
+    """DB 저장값에서 시간만 추출 (예: '2026-06-10 20:00' → '20:00')"""
+    return reserve_time.split(" ")[1] if " " in reserve_time else reserve_time
+
+# ─────────────────────────────────────────
 # DB 초기화
 # ─────────────────────────────────────────
 DB_PATH = "reservations.db"
@@ -63,17 +78,18 @@ def reset_db():
 # 예약 로직 헬퍼
 # ─────────────────────────────────────────
 def get_slot_info(time_slot: str) -> dict:
-    """특정 시간대의 확정/웨이팅 인원 반환"""
+    """특정 시간대의 확정/웨이팅 인원 반환 (오늘 날짜 기준)"""
+    reserve_time = make_reserve_time(time_slot)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute(
         "SELECT COUNT(*) FROM reservations WHERE reserve_time=? AND is_waiting=0",
-        (time_slot,)
+        (reserve_time,)
     )
     confirmed = c.fetchone()[0]
     c.execute(
         "SELECT COUNT(*) FROM reservations WHERE reserve_time=? AND is_waiting=1",
-        (time_slot,)
+        (reserve_time,)
     )
     waiting = c.fetchone()[0]
     conn.close()
@@ -88,15 +104,16 @@ def is_past_slot(time_slot: str) -> bool:
 def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
     """
     예약 추가.
-    반환: {"status": "confirmed"|"waiting"|"full_past"|"duplicate", "queue_order": int}
+    반환: {"status": "confirmed"|"waiting"|"duplicate", "queue_order": int}
     """
+    reserve_time = make_reserve_time(time_slot)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # 중복 예약 확인
+    # 중복 예약 확인 (오늘 날짜 기준)
     c.execute(
         "SELECT id FROM reservations WHERE user_id=? AND reserve_time=?",
-        (user_id, time_slot)
+        (user_id, reserve_time)
     )
     if c.fetchone():
         conn.close()
@@ -105,11 +122,10 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
     info = get_slot_info(time_slot)
 
     if is_past_slot(time_slot):
-        # 이미 지난 시간 → 웨이팅 전환
         queue_order = info["waiting"] + 1
         c.execute(
             "INSERT INTO reservations (user_id, user_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,1,?)",
-            (user_id, user_name, time_slot, queue_order)
+            (user_id, user_name, reserve_time, queue_order)
         )
         conn.commit()
         conn.close()
@@ -118,7 +134,7 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
     if info["confirmed"] < MAX_PLAYERS:
         c.execute(
             "INSERT INTO reservations (user_id, user_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,0,0)",
-            (user_id, user_name, time_slot)
+            (user_id, user_name, reserve_time)
         )
         conn.commit()
         conn.close()
@@ -128,7 +144,7 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
     queue_order = info["waiting"] + 1
     c.execute(
         "INSERT INTO reservations (user_id, user_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,1,?)",
-        (user_id, user_name, time_slot, queue_order)
+        (user_id, user_name, reserve_time, queue_order)
     )
     conn.commit()
     conn.close()
@@ -136,12 +152,13 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
 
 def cancel_reservation(user_id: str, time_slot: str) -> bool:
     """예약 취소. 웨이팅 순번 재정렬 포함."""
+    reserve_time = make_reserve_time(time_slot)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     c.execute(
         "SELECT id, is_waiting FROM reservations WHERE user_id=? AND reserve_time=?",
-        (user_id, time_slot)
+        (user_id, reserve_time)
     )
     row = c.fetchone()
     if not row:
@@ -155,7 +172,7 @@ def cancel_reservation(user_id: str, time_slot: str) -> bool:
     if was_waiting == 0:
         c.execute(
             "SELECT id FROM reservations WHERE reserve_time=? AND is_waiting=1 ORDER BY queue_order ASC LIMIT 1",
-            (time_slot,)
+            (reserve_time,)
         )
         promote = c.fetchone()
         if promote:
@@ -163,10 +180,9 @@ def cancel_reservation(user_id: str, time_slot: str) -> bool:
                 "UPDATE reservations SET is_waiting=0, queue_order=0 WHERE id=?",
                 (promote[0],)
             )
-            # 나머지 웨이팅 순번 재정렬
             c.execute(
                 "SELECT id FROM reservations WHERE reserve_time=? AND is_waiting=1 ORDER BY queue_order ASC",
-                (time_slot,)
+                (reserve_time,)
             )
             remaining = c.fetchall()
             for idx, (wid,) in enumerate(remaining, start=1):
@@ -177,10 +193,15 @@ def cancel_reservation(user_id: str, time_slot: str) -> bool:
     return True
 
 def get_all_reservations() -> list[dict]:
+    """오늘 날짜 예약만 반환"""
+    today = today_str()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT * FROM reservations ORDER BY reserve_time, is_waiting, queue_order")
+    c.execute(
+        "SELECT * FROM reservations WHERE reserve_time LIKE ? ORDER BY reserve_time, is_waiting, queue_order",
+        (f"{today}%",)
+    )
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return rows
@@ -327,7 +348,7 @@ async def status_cmd(interaction: discord.Interaction):
 
     slot_map: dict[str, dict] = {s: {"confirmed": [], "waiting": []} for s in TIME_SLOTS}
     for r in rows:
-        slot = r["reserve_time"]
+        slot = strip_time(r["reserve_time"])
         if slot not in slot_map:
             continue
         if r["is_waiting"] == 0:
@@ -359,21 +380,26 @@ async def status_cmd(interaction: discord.Interaction):
 
 @tree.command(name="내예약", description="내 예약 내역을 확인합니다")
 async def my_reservation_cmd(interaction: discord.Interaction):
+    today = today_str()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT * FROM reservations WHERE user_id=? ORDER BY reserve_time", (str(interaction.user.id),))
+    c.execute(
+        "SELECT * FROM reservations WHERE user_id=? AND reserve_time LIKE ? ORDER BY reserve_time",
+        (str(interaction.user.id), f"{today}%")
+    )
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
 
     if not rows:
-        await interaction.response.send_message("예약 내역이 없습니다.", ephemeral=True)
+        await interaction.response.send_message("오늘 예약 내역이 없습니다.", ephemeral=True)
         return
 
     embed = discord.Embed(title="🎮 내 예약 내역", color=discord.Color.purple())
     for r in rows:
+        time_only = strip_time(r["reserve_time"])
         status = "✅ 확정" if r["is_waiting"] == 0 else f"⏳ 웨이팅 {r['queue_order']}번"
-        embed.add_field(name=f"🕐 {r['reserve_time']}", value=status, inline=True)
+        embed.add_field(name=f"🕐 {time_only}", value=status, inline=True)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -387,8 +413,8 @@ async def on_ready():
     synced = await tree.sync()
     midnight_reset.start()
     print(f"✅ 봇 온라인: {bot.user} | 서버 커맨드 동기화 완료")
-    print(f"sync 결과: {synced}")  # ← 이 줄 추가
-    
+    print(f"sync 결과: {synced}")
+
     cmds = await tree.fetch_commands(guild=discord.Object(id=GUILD_ID))
     print(f"등록된 커맨드: {[c.name for c in cmds]}")
 
