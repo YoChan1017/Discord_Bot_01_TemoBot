@@ -48,7 +48,7 @@ def strip_time(reserve_time: str) -> str:
 # ─────────────────────────────────────────
 # DB 초기화
 # ─────────────────────────────────────────
-DB_PATH = "reservations.db"
+DB_PATH = "data/reservations.db"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
