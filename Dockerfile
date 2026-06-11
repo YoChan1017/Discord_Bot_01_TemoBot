@@ -19,5 +19,8 @@ COPY . .
 # 6. DB 폴더 미리 생성 및 전체 권한(777) 부여
 RUN mkdir -p /app/data && chmod 777 /app/data
 
-# 7. 봇 실행
+# 7. Health check 웹 서버 포트 노출
+EXPOSE 8080
+
+# 8. 봇 실행
 CMD ["python", "Temo_Bot/bot.py"]

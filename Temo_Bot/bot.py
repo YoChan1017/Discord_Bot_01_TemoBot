@@ -8,6 +8,7 @@ import pytz
 import sys
 import os
 from dotenv import load_dotenv
+from aiohttp import web
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -19,6 +20,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ANNOUNCE_CHANNEL_ID = int(os.getenv("ANNOUNCE_CHANNEL_ID"))
+WEB_URL = os.getenv("WEB_URL", "").rstrip("/") 
 
 KST = pytz.timezone("Asia/Seoul")
 MAX_PLAYERS = 5                      # 시간대 당 최대 인원
@@ -379,6 +381,13 @@ async def status_cmd(interaction: discord.Interaction):
     if not has_any:
         embed.description = "아직 예약이 없습니다."
 
+    if WEB_URL:
+        embed.add_field(
+            name="🌐 웹에서 보기",
+            value=f"[예약 현황 페이지 열기]({WEB_URL}/status)",
+            inline=False
+        )
+
     await interaction.response.send_message(embed=embed)
 
 
@@ -425,4 +434,105 @@ async def on_ready():
     print(f"실행 파일 경로: {__file__}")
     print(f"tree 커맨드 수: {len(tree._global_commands)}, {len(tree._guild_commands)}")
 
-bot.run(TOKEN)
+# ─────────────────────────────────────────
+# 웹 서버 (Health Check + 예약 현황 페이지)
+# ─────────────────────────────────────────
+async def handle_health(request):
+    """GET / → 200 OK (health check용)"""
+    return web.Response(text="OK", status=200)
+
+
+async def handle_status(request):
+    """GET /status → 오늘 예약 현황 HTML 페이지"""
+    rows = get_all_reservations()
+    today = datetime.now(KST).strftime("%Y년 %m월 %d일")
+
+    # 슬롯별 데이터 정리
+    slot_map: dict[str, dict] = {s: {"confirmed": [], "waiting": []} for s in TIME_SLOTS}
+    for r in rows:
+        slot = strip_time(r["reserve_time"])
+        if slot not in slot_map:
+            continue
+        if r["is_waiting"] == 0:
+            slot_map[slot]["confirmed"].append(r["user_name"])
+        else:
+            slot_map[slot]["waiting"].append((r["queue_order"], r["user_name"]))
+
+    # 테이블 행 생성
+    table_rows = ""
+    for slot in TIME_SLOTS:
+        confirmed = slot_map[slot]["confirmed"]
+        waiting = sorted(slot_map[slot]["waiting"], key=lambda x: x[0])
+        confirmed_str = ", ".join(confirmed) if confirmed else "—"
+        waiting_str = " / ".join(f"{o}번 {n}" for o, n in waiting) if waiting else "—"
+        full = len(confirmed) >= MAX_PLAYERS
+        row_class = "full" if full else ""
+        table_rows += f"""
+        <tr class="{row_class}">
+            <td>{slot}</td>
+            <td>{len(confirmed)} / {MAX_PLAYERS}</td>
+            <td>{confirmed_str}</td>
+            <td>{waiting_str}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="30">
+  <title>Temo Bot - 예약 현황</title>
+  <style>
+    body {{ font-family: 'Segoe UI', sans-serif; background: #2c2f33; color: #dcddde; margin: 0; padding: 24px; }}
+    h1   {{ color: #7289da; margin-bottom: 4px; }}
+    p.sub {{ color: #72767d; margin-top: 0; font-size: 0.9em; }}
+    table {{ border-collapse: collapse; width: 100%; max-width: 800px; margin-top: 16px; }}
+    th   {{ background: #7289da; color: #fff; padding: 10px 14px; text-align: left; }}
+    td   {{ padding: 9px 14px; border-bottom: 1px solid #40444b; }}
+    tr:hover td {{ background: #36393f; }}
+    tr.full td  {{ color: #f04747; }}
+    .badge {{ display: inline-block; background: #43b581; color: #fff; border-radius: 4px;
+              padding: 2px 8px; font-size: 0.78em; margin-left: 6px; }}
+  </style>
+</head>
+<body>
+  <h1>🎮 Temo Bot 예약 현황</h1>
+  <p class="sub">📅 {today} &nbsp;·&nbsp; 30초마다 자동 갱신</p>
+  <table>
+    <thead>
+      <tr>
+        <th>시간</th>
+        <th>확정 인원</th>
+        <th>확정자</th>
+        <th>웨이팅</th>
+      </tr>
+    </thead>
+    <tbody>
+      {table_rows}
+    </tbody>
+  </table>
+</body>
+</html>"""
+    return web.Response(text=html, content_type="text/html", charset="utf-8")
+
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    app.router.add_get("/status", handle_status)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"🌐 웹 서버 시작: http://0.0.0.0:{port}")
+
+
+# ─────────────────────────────────────────
+# 봇 + 웹 서버 동시 실행
+# ─────────────────────────────────────────
+async def main():
+    await start_web_server()
+    await bot.start(TOKEN)
+
+asyncio.run(main())
