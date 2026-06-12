@@ -61,14 +61,21 @@ def init_db():
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS reservations (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     TEXT    NOT NULL,
-            user_name   TEXT    NOT NULL,
-            reserve_time TEXT   NOT NULL,
-            is_waiting  INTEGER NOT NULL DEFAULT 0,
-            queue_order INTEGER NOT NULL DEFAULT 0
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      TEXT    NOT NULL,
+            user_name    TEXT    NOT NULL,
+            display_name TEXT    NOT NULL DEFAULT '',
+            reserve_time TEXT    NOT NULL,
+            is_waiting   INTEGER NOT NULL DEFAULT 0,
+            queue_order  INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # 기존 DB에 display_name 컬럼이 없으면 추가 (마이그레이션)
+    try:
+        c.execute("ALTER TABLE reservations ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # 이미 존재하면 무시
     conn.commit()
     conn.close()
 
@@ -107,7 +114,7 @@ def is_past_slot(time_slot: str) -> bool:
     slot_hour = int(time_slot.split(":")[0])
     return now.hour >= slot_hour
 
-def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
+def add_reservation(user_id: str, user_name: str, display_name: str, time_slot: str) -> dict:
     """
     예약 추가.
     반환: {"status": "confirmed"|"waiting"|"duplicate", "queue_order": int}
@@ -130,8 +137,8 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
     if is_past_slot(time_slot):
         queue_order = info["waiting"] + 1
         c.execute(
-            "INSERT INTO reservations (user_id, user_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,1,?)",
-            (user_id, user_name, reserve_time, queue_order)
+            "INSERT INTO reservations (user_id, user_name, display_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,?,1,?)",
+            (user_id, user_name, display_name, reserve_time, queue_order)
         )
         conn.commit()
         conn.close()
@@ -139,8 +146,8 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
 
     if info["confirmed"] < MAX_PLAYERS:
         c.execute(
-            "INSERT INTO reservations (user_id, user_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,0,0)",
-            (user_id, user_name, reserve_time)
+            "INSERT INTO reservations (user_id, user_name, display_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,?,0,0)",
+            (user_id, user_name, display_name, reserve_time)
         )
         conn.commit()
         conn.close()
@@ -149,8 +156,8 @@ def add_reservation(user_id: str, user_name: str, time_slot: str) -> dict:
     # 5명 초과 → 웨이팅
     queue_order = info["waiting"] + 1
     c.execute(
-        "INSERT INTO reservations (user_id, user_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,1,?)",
-        (user_id, user_name, reserve_time, queue_order)
+        "INSERT INTO reservations (user_id, user_name, display_name, reserve_time, is_waiting, queue_order) VALUES (?,?,?,?,1,?)",
+        (user_id, user_name, display_name, reserve_time, queue_order)
     )
     conn.commit()
     conn.close()
@@ -247,7 +254,8 @@ class TimeSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         time_slot = self.values[0]
         user = interaction.user
-        result = add_reservation(str(user.id), str(user), time_slot)
+        display_name = user.display_name if hasattr(user, "display_name") else str(user)
+        result = add_reservation(str(user.id), str(user), display_name, time_slot)
 
         if result["status"] == "confirmed":
             embed = discord.Embed(
@@ -357,10 +365,11 @@ async def status_cmd(interaction: discord.Interaction):
         slot = strip_time(r["reserve_time"])
         if slot not in slot_map:
             continue
+        nick = r.get("display_name") or r["user_name"]
         if r["is_waiting"] == 0:
-            slot_map[slot]["confirmed"].append(r["user_name"])
+            slot_map[slot]["confirmed"].append(nick)
         else:
-            slot_map[slot]["waiting"].append((r["queue_order"], r["user_name"]))
+            slot_map[slot]["waiting"].append((r["queue_order"], nick))
 
     has_any = False
     for slot in TIME_SLOTS:
@@ -453,10 +462,11 @@ async def handle_status(request):
         slot = strip_time(r["reserve_time"])
         if slot not in slot_map:
             continue
+        nick = r.get("display_name") or r["user_name"]
         if r["is_waiting"] == 0:
-            slot_map[slot]["confirmed"].append(r["user_name"])
+            slot_map[slot]["confirmed"].append(nick)
         else:
-            slot_map[slot]["waiting"].append((r["queue_order"], r["user_name"]))
+            slot_map[slot]["waiting"].append((r["queue_order"], nick))
 
     # 테이블 행 생성
     table_rows = ""

@@ -1,6 +1,7 @@
 # 🎮 게임 예약 디스코드 봇
 
-시간대별 인원 제한, 웨이팅, 자동 승격을 지원하는 Discord 예약 봇입니다.
+시간대별 인원 제한, 웨이팅, 자동 승격을 지원하는 Discord 예약 봇입니다.  
+예약 현황을 웹 페이지로도 확인할 수 있습니다.
 
 ---
 
@@ -20,6 +21,7 @@ pip install -r requirements.txt
 DISCORD_TOKEN=여기에_봇_토큰_입력
 GUILD_ID=서버_ID
 ANNOUNCE_CHANNEL_ID=알림_채널_ID
+WEB_URL=http://localhost:8080
 ```
 
 | 변수 | 설명 |
@@ -27,8 +29,12 @@ ANNOUNCE_CHANNEL_ID=알림_채널_ID
 | `DISCORD_TOKEN` | Discord Developer Portal에서 발급받은 봇 토큰 |
 | `GUILD_ID` | 봇을 사용할 서버 ID |
 | `ANNOUNCE_CHANNEL_ID` | 자정 알림을 보낼 채널 ID |
+| `WEB_URL` | 웹 서버 주소 (로컬: `http://localhost:8080`, 배포 시 실제 도메인 입력) |
+| `PORT` | 웹 서버 포트 (기본값 `8080`, 생략 가능) |
 
 > **ID 확인 방법:** Discord 설정 → 고급 → **개발자 모드** 활성화 후, 서버/채널 우클릭 → **ID 복사**
+
+> **WEB_URL 미설정 시:** `/현황` 명령어에서 웹 링크가 표시되지 않습니다. 로컬 테스트 중이라면 `http://localhost:8080`으로 설정하세요.
 
 `bot.py` 내 추가 설정:
 
@@ -45,6 +51,8 @@ ANNOUNCE_CHANNEL_ID=알림_채널_ID
 python bot.py
 ```
 
+봇 시작 시 Discord 봇과 웹 서버가 동시에 실행됩니다.
+
 ---
 
 ## 📋 명령어
@@ -53,8 +61,21 @@ python bot.py
 |---|---|
 | `/예약` | 시간대 선택 드롭다운으로 예약 |
 | `/취소 [시간]` | 특정 시간대 예약/웨이팅 취소 |
-| `/현황` | 오늘 전체 예약 현황 공개 조회 |
+| `/현황` | 오늘 전체 예약 현황 공개 조회 (웹 링크 포함) |
 | `/내예약` | 내 예약 내역 확인 (본인만) |
+
+---
+
+## 🌐 웹 페이지
+
+봇 실행 시 웹 서버도 함께 시작됩니다.
+
+| 경로 | 설명 |
+|---|---|
+| `/` | Health check (`200 OK`) |
+| `/status` | 오늘 예약 현황 페이지 (30초 자동 갱신) |
+
+`/현황` 명령어 응답에 `/status` 페이지 링크가 포함됩니다. (`WEB_URL` 설정 시)
 
 ---
 
@@ -84,11 +105,14 @@ python bot.py
 ```sql
 id           INTEGER  PK AUTOINCREMENT
 user_id      TEXT     Discord 고유 ID
-user_name    TEXT     유저 이름 (표시용)
+user_name    TEXT     계정명 (username#discriminator)
+display_name TEXT     서버 닉네임 (없으면 user_name으로 대체)
 reserve_time TEXT     선택 시간 (예: "20:00")
 is_waiting   INTEGER  0=확정, 1=웨이팅
 queue_order  INTEGER  웨이팅 순번 (확정은 0)
 ```
+
+> 기존 DB(`display_name` 컬럼 없음)는 봇 시작 시 자동으로 마이그레이션됩니다.
 
 ---
 
@@ -96,9 +120,13 @@ queue_order  INTEGER  웨이팅 순번 (확정은 0)
 
 ```
 .
-├── bot.py
+├── Temo_Bot/
+│   └── bot.py
 ├── .env              # 토큰 등 민감 정보 (Git 제외)
 ├── .gitignore
+├── .dockerignore
+├── Dockerfile
 ├── requirements.txt
-└── reservations.db   # 실행 후 자동 생성 (Git 제외)
+└── data/
+    └── reservations.db   # 실행 후 자동 생성 (Git 제외)
 ```

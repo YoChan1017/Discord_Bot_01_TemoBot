@@ -10,6 +10,7 @@ SQLite로 간단하게 기록저장
 id: 고유 번호 (자동 증가)
 user_id: 유저의 디스코드 고유 ID (중복 예약 방지용)
 user_name: 유저 이름 (표시용)
+display_name: 서버 닉네임
 reserve_time: 선택한 시간대 (날짜 및 시간 | 예: "2026-06-10 20:00")
 is_waiting: 웨이팅 여부 (0이면 확정, 1이면 웨이팅)
 queue_order: 웨이팅 순서 (대기 번호)
