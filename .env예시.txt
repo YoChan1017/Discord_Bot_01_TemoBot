@@ -1,0 +1,15 @@
+# Discord Bot 설정
+# Discord Developer Portal에서 발급받은 봇 토큰
+DISCORD_TOKEN=[나의 디스코드 봇 토큰]
+
+# 봇이 사용할 서버(길드) ID
+GUILD_ID=[나의 디스코드 서버 ID]
+
+# 날짜 변경 알림을 보낼 채널 ID
+ANNOUNCE_CHANNEL_ID=[나의 디스코드 서버채널 ID]
+
+# 배포 후 생성된 도메인
+WEB_URL=[배포 링크/도메인(http://localhost:8080)]
+
+# 1. '.env' 파일로 저장
+# 2. 'bot.py'와 같은 경로
